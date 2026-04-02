@@ -78,6 +78,7 @@ function printUsage() {
       "  node scripts/codex-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>]",
       "  node scripts/codex-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [focus text]",
       "  node scripts/codex-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh] [--model <model|spark>] [--effort <none|minimal|low|medium|high|xhigh>] [prompt]",
+      "  node scripts/codex-companion.mjs run [--wait|--background] [--resume-last|--resume|--fresh] [--model <model|spark>] [--effort <none|minimal|low|medium|high|xhigh>] [prompt]",
       "  node scripts/codex-companion.mjs status [job-id] [--all] [--json]",
       "  node scripts/codex-companion.mjs result [job-id] [--json]",
       "  node scripts/codex-companion.mjs cancel [job-id] [--json]"
@@ -457,7 +458,7 @@ async function executeTaskRun(request) {
     defaultPrompt: resumeThreadId ? DEFAULT_CONTINUE_PROMPT : "",
     model: request.model,
     effort: request.effort,
-    sandbox: request.write ? "workspace-write" : "read-only",
+    sandbox: request.sandbox ?? (request.write ? "workspace-write" : "read-only"),
     onProgress: request.onProgress,
     persistThread: true,
     threadName: resumeThreadId ? null : buildPersistentTaskThreadName(request.prompt || DEFAULT_CONTINUE_PROMPT)
@@ -570,7 +571,7 @@ function buildTaskJob(workspaceRoot, taskMetadata, write) {
   });
 }
 
-function buildTaskRequest({ cwd, model, effort, prompt, write, resumeLast, jobId }) {
+function buildTaskRequest({ cwd, model, effort, prompt, write, resumeLast, jobId, sandbox }) {
   return {
     cwd,
     model,
@@ -578,7 +579,8 @@ function buildTaskRequest({ cwd, model, effort, prompt, write, resumeLast, jobId
     prompt,
     write,
     resumeLast,
-    jobId
+    jobId,
+    sandbox
   };
 }
 
@@ -756,6 +758,70 @@ async function handleTask(argv) {
         effort,
         prompt,
         write,
+        resumeLast,
+        jobId: job.id,
+        onProgress: progress
+      }),
+    { json: options.json }
+  );
+}
+
+async function handleRun(argv) {
+  const { options, positionals } = parseCommandInput(argv, {
+    valueOptions: ["model", "effort", "cwd", "prompt-file"],
+    booleanOptions: ["json", "wait", "resume-last", "resume", "fresh", "background"],
+    aliasMap: {
+      m: "model"
+    }
+  });
+
+  const cwd = resolveCommandCwd(options);
+  const workspaceRoot = resolveCommandWorkspace(options);
+  const model = normalizeRequestedModel(options.model);
+  const effort = normalizeReasoningEffort(options.effort);
+  const prompt = readTaskPrompt(cwd, options, positionals);
+
+  const resumeLast = Boolean(options["resume-last"] || options.resume);
+  const fresh = Boolean(options.fresh);
+  if (resumeLast && fresh) {
+    throw new Error("Choose either --resume/--resume-last or --fresh.");
+  }
+  const taskMetadata = {
+    title: resumeLast ? "Codex Resume" : "Codex Run",
+    summary: resumeLast ? DEFAULT_CONTINUE_PROMPT : shorten(prompt || "Run")
+  };
+
+  if (options.background) {
+    ensureCodexReady(cwd);
+    requireTaskRequest(prompt, resumeLast);
+
+    const job = buildTaskJob(workspaceRoot, taskMetadata, true);
+    const request = buildTaskRequest({
+      cwd,
+      model,
+      effort,
+      prompt,
+      write: true,
+      resumeLast,
+      jobId: job.id,
+      sandbox: "danger-full-access"
+    });
+    const { payload } = enqueueBackgroundTask(cwd, job, request);
+    outputCommandResult(payload, renderQueuedTaskLaunch(payload), options.json);
+    return;
+  }
+
+  const job = buildTaskJob(workspaceRoot, taskMetadata, true);
+  await runForegroundCommand(
+    job,
+    (progress) =>
+      executeTaskRun({
+        cwd,
+        model,
+        effort,
+        prompt,
+        write: true,
+        sandbox: "danger-full-access",
         resumeLast,
         jobId: job.id,
         onProgress: progress
@@ -979,6 +1045,10 @@ async function main() {
       break;
     case "task":
       await handleTask(argv);
+      break;
+    case "run":
+    case "exec":
+      await handleRun(argv);
       break;
     case "task-worker":
       await handleTaskWorker(argv);
