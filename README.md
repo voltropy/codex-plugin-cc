@@ -11,6 +11,7 @@ they already have.
 
 - `/codex:review` for a normal read-only Codex review
 - `/codex:adversarial-review` for a steerable challenge review
+- `/codex:run` to tell Codex to do something with full permissions (bash, git, web, file read/write)
 - `/codex:rescue`, `/codex:status`, `/codex:result`, and `/codex:cancel` to delegate work and manage background jobs
 
 ## Requirements
@@ -123,6 +124,34 @@ Examples:
 
 This command is read-only. It does not fix code.
 
+### `/codex:run`
+
+Tells Codex to do something. Unlike the review commands, this runs with full permissions: bash commands, git, web search and fetch, and read/write/edit access to files in the workspace.
+
+Use it when you want Codex to:
+
+- make a change or implement a feature
+- run a command and act on the output
+- do research (web searches, reading docs) and then apply findings
+- perform any task that requires writing files or running shell commands
+
+It supports `--wait`, `--background`, `--model`/`-m`, `--effort`, `--resume`/`--resume-last`, and `--fresh`. The prompt is passed as positional arguments.
+
+Examples:
+
+```bash
+/codex:run add a --verbose flag to the CLI
+/codex:run --background refactor the auth module to use the new session API
+/codex:run --model spark --effort low fix the typo in the error message
+/codex:run --resume apply the top suggestion from the last run
+```
+
+**Notes:**
+
+- if you omit `--wait` or `--background`, the plugin asks which mode you prefer and recommends background
+- if you do not pass `--model` or `--effort`, Codex uses its own defaults
+- `spark` maps to `gpt-5.3-codex-spark`
+
 ### `/codex:rescue`
 
 Hands a task to Codex through the `codex:codex-rescue` subagent.
@@ -229,6 +258,13 @@ When the review gate is enabled, the plugin uses a `Stop` hook to run a targeted
 /codex:review
 ```
 
+### Tell Codex To Do Something
+
+```bash
+/codex:run add error handling to the fetch calls in api.ts
+/codex:run --background migrate all tests from Jest to Vitest
+```
+
 ### Hand A Problem To Codex
 
 ```bash
@@ -239,6 +275,7 @@ When the review gate is enabled, the plugin uses a `Stop` hook to run a targeted
 
 ```bash
 /codex:adversarial-review --background
+/codex:run --background refactor the database layer to use connection pooling
 /codex:rescue --background investigate the flaky test
 ```
 
